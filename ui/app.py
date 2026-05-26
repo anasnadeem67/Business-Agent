@@ -135,10 +135,11 @@ hr { border-color: #e2e8f0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-if "messages" not in st.session_state:    st.session_state.messages = []
-if "exec_logs" not in st.session_state:   st.session_state.exec_logs = []
-if "total_steps" not in st.session_state: st.session_state.total_steps = 0
+if "messages" not in st.session_state:      st.session_state.messages = []
+if "exec_logs" not in st.session_state:     st.session_state.exec_logs = []
+if "total_steps" not in st.session_state:   st.session_state.total_steps = 0
 if "total_queries" not in st.session_state: st.session_state.total_queries = 0
+if "pending_input" not in st.session_state: st.session_state.pending_input = ""
 
 st.markdown("""
 <div class="main-header">
@@ -213,11 +214,11 @@ examples = [
     "Analyze the competitive landscape for a food delivery app in Karachi",
 ]
 cols = st.columns(len(examples))
-chosen_example = None
 for i, (col, ex) in enumerate(zip(cols, examples)):
     with col:
         if st.button(ex[:35] + "…", key=f"ex_{i}"):
-            chosen_example = ex
+            st.session_state.pending_input = ex
+            st.rerun()
 
 chat_col, log_col = st.columns([3, 2])
 
@@ -242,7 +243,7 @@ with chat_col:
     st.markdown("---")
     user_input = st.text_area(
         "Your business query:",
-        value=chosen_example or "",
+        value=st.session_state.pending_input,
         placeholder="Ask me anything about your business — strategy, analysis, planning, calculations...",
         height=100,
         key="user_input",
@@ -252,6 +253,7 @@ with chat_col:
         submit = st.button("🚀 Run Agent", use_container_width=True)
     with clear_col:
         if st.button("🔄 New", use_container_width=True):
+            st.session_state.pending_input = ""
             st.rerun()
 
 with log_col:
@@ -284,27 +286,29 @@ with log_col:
         </div>
         """, unsafe_allow_html=True)
 
-if submit and user_input.strip():
-    query = user_input.strip()
-    history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-    status_box = st.empty()
-    log = ExecutionLog()
-    updates = []
+if submit:
+    query = st.session_state.get("user_input", "").strip()
+    if query:
+        st.session_state.pending_input = ""
+        history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+        status_box = st.empty()
+        log = ExecutionLog()
+        updates = []
 
-    def yield_update(msg: str):
-        updates.append(msg)
-        status_box.info("  ·  ".join(updates[-3:]))
+        def yield_update(msg: str):
+            updates.append(msg)
+            status_box.info("  ·  ".join(updates[-3:]))
 
-    with st.spinner("🤖 Agent is working..."):
-        try:
-            final_answer = run_agent(query, history, log, yield_update)
-        except Exception as e:
-            final_answer = f"❌ Agent error: {str(e)}"
+        with st.spinner("🤖 Agent is working..."):
+            try:
+                final_answer = run_agent(query, history, log, yield_update)
+            except Exception as e:
+                final_answer = f"❌ Agent error: {str(e)}"
 
-    status_box.empty()
-    st.session_state.messages.append({"role": "user", "content": query})
-    st.session_state.messages.append({"role": "assistant", "content": final_answer})
-    st.session_state.exec_logs.append(log)
-    st.session_state.total_queries += 1
-    st.session_state.total_steps += len(log.entries)
-    st.rerun()
+        status_box.empty()
+        st.session_state.messages.append({"role": "user", "content": query})
+        st.session_state.messages.append({"role": "assistant", "content": final_answer})
+        st.session_state.exec_logs.append(log)
+        st.session_state.total_queries += 1
+        st.session_state.total_steps += len(log.entries)
+        st.rerun()
