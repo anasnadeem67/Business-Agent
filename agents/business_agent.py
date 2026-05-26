@@ -1,7 +1,7 @@
 """
 agents/business_agent.py
 Autonomous Business Agent — multi-step reasoning, task planning, execution logs
-Uses OpenAI SDK with OpenRouter backend
+Uses OpenAI SDK with Groq backend
 """
 
 import os
@@ -18,12 +18,12 @@ load_dotenv()
 
 def get_client() -> OpenAI:
     return OpenAI(
-        api_key=os.getenv("OPENROUTER_API_KEY"),
-        base_url=os.getenv("BASE_URL", "https://openrouter.ai/api/v1"),
+        api_key=os.getenv("GROQ_API_KEY"),
+        base_url=os.getenv("BASE_URL", "https://api.groq.com/openai/v1"),
     )
 
 def get_model() -> str:
-    return os.getenv("MODEL", "mistralai/mistral-7b-instruct:free")
+    return os.getenv("MODEL", "llama-3.3-70b-versatile")
 
 
 # ─────────────────────────────────────────────
@@ -100,23 +100,6 @@ class ExecutionLog:
 
 
 # ─────────────────────────────────────────────
-# CHECK IF MODEL SUPPORTS TOOL CALLING
-# ─────────────────────────────────────────────
-
-NO_TOOL_MODELS = [
-    "nvidia/", "google/gemma", "openchat", "cinematika",
-    "toppy", "mythomax", "remm", "noromaid"
-]
-
-def model_supports_tools(model: str) -> bool:
-    model_lower = model.lower()
-    for blocked in NO_TOOL_MODELS:
-        if blocked in model_lower:
-            return False
-    return True
-
-
-# ─────────────────────────────────────────────
 # FALLBACK: Direct answer without tools
 # ─────────────────────────────────────────────
 
@@ -126,16 +109,13 @@ def run_agent_no_tools(
     log: ExecutionLog,
     yield_updates,
 ) -> str:
-    """For models that don't support tool calling — direct answer mode."""
-    from tools.business_tools import execute_tool
-
+    """Fallback direct answer mode when tool calling is unavailable."""
     client = get_client()
     model = get_model()
 
     log.add("reasoning", f"Model '{model}' — using direct reasoning mode (no tool calls)")
     yield_updates("🧠 Agent analyzing your request...")
 
-    # Enhanced system prompt asking model to reason step-by-step without tools
     direct_prompt = SYSTEM_PROMPT + """
 
 ## IMPORTANT — DIRECT MODE
@@ -179,13 +159,8 @@ def run_agent(
 ) -> str:
     from tools.business_tools import TOOLS, execute_tool
 
-    model = get_model()
-
-    # If model doesn't support tools, use direct mode
-    if not model_supports_tools(model):
-        return run_agent_no_tools(user_message, chat_history, log, yield_updates)
-
     client = get_client()
+    model = get_model()
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages += chat_history
@@ -206,7 +181,7 @@ def run_agent(
             )
         except Exception as e:
             err = str(e)
-            # If tool calling not supported by API, fall back to direct mode
+            # If tool calling not supported, fall back to direct mode
             if "tool" in err.lower() or "function" in err.lower() or "400" in err:
                 log.add("reasoning", f"Tool calling not supported: {err} — switching to direct mode")
                 yield_updates("⚠️ Switching to direct reasoning mode...")
@@ -244,12 +219,11 @@ def run_agent(
         else:
             final_text = msg.content or ""
             if not final_text.strip():
-                # Model returned nothing — switch to direct mode
                 log.add("reasoning", "Empty response from model — switching to direct mode")
                 return run_agent_no_tools(user_message, chat_history, log, yield_updates)
             log.add("response", final_text)
             return final_text
 
-    # Max iterations reached — try direct mode as last resort
+    # Max iterations reached
     log.add("reasoning", "Max iterations reached — falling back to direct mode")
     return run_agent_no_tools(user_message, chat_history, log, yield_updates)
